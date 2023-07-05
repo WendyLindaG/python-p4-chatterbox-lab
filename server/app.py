@@ -2,7 +2,6 @@ from flask import Flask, request, make_response, jsonify
 from flask_cors import CORS
 from flask_migrate import Migrate
 
-
 from models import db, Message
 
 app = Flask(__name__)
@@ -13,60 +12,72 @@ app.json.compact = False
 CORS(app)
 migrate = Migrate(app, db)
 
-
 db.init_app(app)
 
+#get and post
+@app.route('/messages', methods=["GET","POST"])
+def messages():
+    if request.method == 'GET':
+        messages = []
+        for message in Message.query.all():
+            message_dict = message.to_dict()
+            messages.append(message_dict)
+        response = make_response(jsonify(messages), 200)
+        return response
+    elif request.method == 'POST':
+        new_message = Message(
+            body=request.get_json().get("body"),
+            username=request.get_json().get("username")
+        )
 
-@app.route('/messages', methods=['GET'])
-def get_messages():
-    messages = Message.query.order_by(Message.created_at.asc()).all()
-    serialized_messages = [message.to_dict() for message in messages]
-    return jsonify(serialized_messages)
+        db.session.add(new_message)
+        db.session.commit()
 
+        message_dict = new_message.to_dict()
 
-@app.route('/messages', methods=['POST'])
-def create_message():
-    body = request.json.get('body')
-    username = request.json.get('username')
+        response = make_response(jsonify(message_dict), 201)
 
-    if not body or not username:
-        return make_response(jsonify({'error': 'body and username are required'}), 400)
+        return response
 
-    message = Message(body=body, username=username)
-    db.session.add(message)
-    db.session.commit()
+#patch and delete
+@app.route('/messages/<int:id>', methods=['GET','PATCH','DELETE'])
+def messages_by_id(id):
+    message = Message.query.filter_by(id=id).first()
+    if message is None:
+        response_body = {
+            "message": "This message doesn't exist in the database."
+        }
+        response = make_response(jsonify(response_body), 404)
+        return response
+    else:
+        if request.method == "GET":
+            message_dict = message.to_dict()
+            response = make_response(jsonify(message_dict), 200)
+            return response
+        elif request.method == 'PATCH':
+            for attr in request.get_json():
+                if attr == 'body':
+                    message.body = request.get_json().get('body')
+                elif attr == 'username':
+                    message.username = request.get_json().get('username')
 
-    return jsonify(message.to_dict()), 201
+            db.session.commit()
+            message_dict = message.to_dict()
+            response = make_response(jsonify(message_dict), 200)
 
+            return response
+        elif request.method == 'DELETE':
+            db.session.delete(message)
+            db.session.commit()
 
-@app.route('/messages/<int:id>', methods=['PATCH'])
-def update_message(id):
-    message = db.session.get(Message, id)
+            response_body = {
+                "delete_successful": True,
+                "message": "Review deleted."
+            }
 
-    if not message:
-        return make_response(jsonify({'error': 'message not found'}), 404)
+            response = make_response(jsonify(response_body), 200)
 
-    body = request.json.get('body')
-
-    if not body:
-        return make_response(jsonify({'error': 'body is required'}), 400)
-
-    message.body = body
-    db.session.commit()
-
-    return jsonify(message.to_dict())
-
-@app.route('/messages/<int:id>', methods=['DELETE'])
-def delete_message(id):
-    message = db.session.get(Message, id)
-
-    if not message:
-        return make_response(jsonify({'error': 'message not found'}), 404)
-
-    db.session.delete(message)
-    db.session.commit()
-
-    return make_response(jsonify({'message': 'message deleted'}), 204)
+            return response
 
 if __name__ == '__main__':
     app.run(port=5555)
